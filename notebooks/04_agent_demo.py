@@ -34,6 +34,41 @@ def show(title, rows):
     display(df)
 
 # COMMAND ----------
+# MAGIC %md ## Reset demo state
+# MAGIC Aligns the trip to the days we actually have a live forecast for (which
+# MAGIC include the real poor-air-quality days), rebuilds a clean itinerary with
+# MAGIC outdoor items so rescheduling has something to act on, and clears the
+# MAGIC packing list — so every BEFORE/AFTER below is a clean, real delta.
+
+# COMMAND ----------
+_dest_id = tools.get_trip(TRIP_ID)["destination_id"]
+_days = [r["forecast_date"] for r in lakebase.run_query(
+    "SELECT DISTINCT forecast_date FROM weather_snapshots "
+    "WHERE destination_id = %s ORDER BY forecast_date LIMIT 3", (_dest_id,))]
+lakebase.run_write("UPDATE trips SET start_date = %s, end_date = %s WHERE trip_id = %s",
+                   (str(_days[0]), str(_days[-1]), TRIP_ID))
+lakebase.run_write("DELETE FROM itinerary_items WHERE trip_id = %s", (TRIP_ID,))
+
+def _act(name):
+    r = lakebase.run_query(
+        "SELECT activity_id FROM activities WHERE destination_id = %s AND name = %s",
+        (_dest_id, name))
+    return r[0]["activity_id"] if r else None
+
+_plan = [
+    (_days[0], "09:00", "12:00", "Johnston Canyon Hike"),
+    (_days[0], "13:00", "15:00", "Lake Louise Canoeing"),
+    (_days[1], "09:00", "10:30", "Banff Park Museum"),
+    (_days[1], "14:00", "16:00", "Banff Upper Hot Springs"),
+    (_days[min(2, len(_days) - 1)], "09:00", "12:00", "Johnston Canyon Hike"),
+]
+for _d, _st, _et, _nm in _plan:
+    tools.add_itinerary_item(TRIP_ID, str(_d), _nm, _act(_nm), _st, _et)
+
+lakebase.run_write("DELETE FROM packing_items WHERE trip_id = %s", (TRIP_ID,))
+print("Reset done. Trip now spans:", [str(d) for d in _days])
+
+# COMMAND ----------
 # MAGIC %md ## 0. The weather the agent will reason about
 # COMMAND ----------
 show("Per-day weather (is_bad drives rescheduling):", tools.weather_by_day(TRIP_ID))

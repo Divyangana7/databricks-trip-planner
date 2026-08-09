@@ -7,6 +7,10 @@ Foundation Model APIs, and pgvector inside Lakebase.
 
 import os
 
+# --- Unity Catalog (Delta bronze/silver tables written by the Spark pipeline)
+UC_CATALOG = os.environ.get("UC_CATALOG", "main")
+UC_SCHEMA = os.environ.get("UC_SCHEMA", "trip_planner")
+
 # --- Lakebase secret scope (matches app.yaml / Day-1 convention) ------------
 LAKEBASE_SECRET_SCOPE = os.environ.get("LAKEBASE_SECRET_SCOPE", "database")
 LAKEBASE_SECRET_KEY = os.environ.get("LAKEBASE_SECRET_KEY", "lakebase-url")

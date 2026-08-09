@@ -34,7 +34,7 @@ WIKIPEDIA_REST = os.environ.get(
 # Wikimedia asks for a descriptive User-Agent with contact info.
 WIKIMEDIA_USER_AGENT = os.environ.get(
     "WIKIMEDIA_USER_AGENT",
-    "trip-planner-bootcamp/1.0 (https://github.com/OWNER/REPO; you@example.com)",
+    "databricks-trip-planner/1.0 (https://github.com/Divyangana7/databricks-trip-planner)",
 )
 
 # --- Retrieval / agent tuning ----------------------------------------------

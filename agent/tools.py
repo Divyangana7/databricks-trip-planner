@@ -21,6 +21,33 @@ import models
 logger = logging.getLogger("trip-planner.tools")
 
 
+def _norm(v):
+    """Empty/blank -> None (so COALESCE keeps the existing value)."""
+    return v if (v is not None and str(v).strip() != "") else None
+
+
+def _resolve_day(trip_id: int, day_date) -> str | None:
+    """Return a valid YYYY-MM-DD within the trip; default/clamp to the trip range.
+
+    The model sometimes passes '' or a vague date; this keeps writes from failing
+    and maps 'first day' style requests to the trip's start date.
+    """
+    import re
+    trip = get_trip(trip_id)
+    if "error" in trip:
+        return _norm(day_date)
+    start, end = str(trip["start_date"]), str(trip["end_date"])
+    d = _norm(day_date)
+    if not d or not re.match(r"^\d{4}-\d{2}-\d{2}$", str(d)):
+        return start
+    d = str(d)
+    if d < start:
+        return start
+    if d > end:
+        return end
+    return d
+
+
 # ---------------------------------------------------------------- reads -----
 def get_trip(trip_id: int) -> dict:
     rows = lakebase.run_query(
@@ -107,9 +134,12 @@ def search_activities(trip_id: int, query: str, top_k: int = 5,
 
 
 # --------------------------------------------------------------- writes -----
-def add_itinerary_item(trip_id: int, day_date: str, title: str, activity_id: int | None = None,
+def add_itinerary_item(trip_id: int, day_date: str | None = None, title: str = "Untitled",
+                       activity_id: int | None = None,
                        start_time: str | None = None, end_time: str | None = None,
                        notes: str | None = None) -> dict:
+    day_date = _resolve_day(trip_id, day_date)          # never empty / out of range
+    start_time, end_time = _norm(start_time), _norm(end_time)
     rows = lakebase.run_write_returning(
         """
         INSERT INTO itinerary_items
@@ -127,6 +157,11 @@ def add_itinerary_item(trip_id: int, day_date: str, title: str, activity_id: int
 def move_itinerary_item(item_id: int, day_date: str | None = None,
                         start_time: str | None = None, end_time: str | None = None,
                         reason: str | None = None) -> dict:
+    import re
+    day_date = _norm(day_date)
+    if day_date and not re.match(r"^\d{4}-\d{2}-\d{2}$", str(day_date)):
+        day_date = None                                  # ignore malformed dates
+    start_time, end_time, reason = _norm(start_time), _norm(end_time), _norm(reason)
     rows = lakebase.run_write_returning(
         """
         UPDATE itinerary_items SET

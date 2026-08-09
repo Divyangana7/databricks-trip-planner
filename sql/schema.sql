@@ -151,10 +151,9 @@ CREATE TABLE IF NOT EXISTS packing_items (
 -- IVFFlat needs ANALYZE + data present to be effective; safe to create now.
 -- ----------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_dest_desc_vec
-    ON destinations USING ivfflat (description_embedding vector_cosine_ops) WITH (lists = 100);
+    ON destinations USING hnsw (description_embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_act_req_vec
-    ON activities USING ivfflat (requirements_embedding vector_cosine_ops) WITH (lists = 100);
-
+    ON activities USING hnsw (requirements_embedding vector_cosine_ops);
 -- ----------------------------------------------------------------------------
 -- OPTIONAL — Change Data Feed readiness (Lakebase CDF -> Unity Catalog Delta).
 -- Uncomment if you also want the reverse pipeline (Lakebase -> lakehouse).

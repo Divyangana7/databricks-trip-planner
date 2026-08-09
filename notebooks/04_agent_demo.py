@@ -12,7 +12,7 @@
 dbutils.library.restartPython()
 
 # COMMAND ----------
-import os, sys, json
+import os, sys, json, datetime
 sys.path.insert(0, os.path.abspath(".."))
 import pandas as pd
 import lakebase
@@ -26,7 +26,12 @@ print("Demo trip_id:", TRIP_ID)
 
 def show(title, rows):
     print(title)
-    display(pd.DataFrame(rows))
+    df = pd.DataFrame(rows)
+    # Databricks display() can't render bare TIME/INTERVAL columns — stringify them.
+    for col in df.columns:
+        if df[col].map(lambda v: isinstance(v, (datetime.time, datetime.timedelta))).any():
+            df[col] = df[col].astype(str)
+    display(df)
 
 # COMMAND ----------
 # MAGIC %md ## 0. The weather the agent will reason about

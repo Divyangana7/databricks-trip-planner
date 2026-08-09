@@ -1,4 +1,4 @@
-# AI Trip & Outdoor Activity Planner
+# AI Trip & Outdoor Activity Planner — Databricks Capstone
 
 A Databricks app where users save destinations and preferences, then ask an AI
 agent to build a **weather-aware itinerary**. The agent retrieves suitable
@@ -39,8 +39,9 @@ pgvector reference blog; Open-Meteo and Wikimedia API docs.
 ```
 sql/schema.sql      sql/seed.sql      sql/verify.sql     [Phase 1 — DONE]
 config.py  lakebase.py  setup_secrets.py  requirements.txt [Phase 1 — DONE]
-models.py                                                 [Phase 2] FMA embed/chat client
-clients/open_meteo.py  clients/wikimedia.py               [Phase 2] API clients
+models.py                                                 [Phase 2 — DONE] FMA embed/chat client
+clients/open_meteo.py  clients/wikimedia.py               [Phase 2 — DONE] API clients
+notebooks/01_smoke_test_clients.py                        [Phase 2 — DONE] live API + model checks
 pipeline/ingest_spark.py  pipeline/embed_job.py           [Phase 3] Spark + embeddings
 agent/tools.py  agent/agent.py                            [Phase 4] agent + tools
 app.py  app.yaml  templates/index.html                    [Phase 5] Databricks App

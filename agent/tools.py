@@ -39,8 +39,9 @@ def get_trip(trip_id: int) -> dict:
 def list_itinerary(trip_id: int) -> list[dict]:
     return lakebase.run_query(
         """
-        SELECT i.item_id, i.day_date, i.start_time, i.end_time, i.title,
-               i.status, i.reschedule_reason, i.activity_id,
+        SELECT i.item_id, i.day_date,
+               i.start_time::text AS start_time, i.end_time::text AS end_time,
+               i.title, i.status, i.reschedule_reason, i.activity_id,
                COALESCE(a.is_outdoor, FALSE) AS is_outdoor, a.category
         FROM itinerary_items i
         LEFT JOIN activities a ON a.activity_id = i.activity_id
@@ -116,7 +117,7 @@ def add_itinerary_item(trip_id: int, day_date: str, title: str, activity_id: int
         VALUES (%s, %s, %s, %s, %s, %s, %s, 'planned',
                 COALESCE((SELECT MAX(sort_order) + 1 FROM itinerary_items
                           WHERE trip_id = %s AND day_date = %s), 1))
-        RETURNING item_id, trip_id, day_date, title, start_time, status
+        RETURNING item_id, trip_id, day_date, title, start_time::text AS start_time, status
         """,
         (trip_id, activity_id, day_date, start_time, end_time, title, notes, trip_id, day_date),
     )
@@ -136,7 +137,7 @@ def move_itinerary_item(item_id: int, day_date: str | None = None,
             reschedule_reason = COALESCE(%s, reschedule_reason),
             updated_at        = now()
         WHERE item_id = %s
-        RETURNING item_id, day_date, start_time, title, status, reschedule_reason
+        RETURNING item_id, day_date, start_time::text AS start_time, title, status, reschedule_reason
         """,
         (day_date, start_time, end_time, reason, item_id),
     )

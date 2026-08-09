@@ -1,16 +1,17 @@
 """
 Spark ingestion pipeline.
 
-Flow (this is the "data pipeline in Spark" requirement):
+Flow (the "data pipeline in Spark" requirement):
     Open-Meteo / Wikimedia  ->  Delta bronze (raw, append)  ->
     Spark transform (dedupe, type, derive)  ->  Delta silver (curated)  ->
     upsert into Lakebase (weather_snapshots, activities)
 
-Why fetch in the driver then process in Spark: the destination set is small, so
-we fetch once (avoids hammering the public APIs / 429s), land the raw payload in
-a Delta bronze table as an immutable record, and do all transformation and the
-lakehouse writes in Spark. The app and agent then read from Lakebase, never the
-live APIs.
+Delta target resolution:
+  * Uses config.UC_CATALOG / UC_SCHEMA if set, else the session's CURRENT
+    catalog/schema (which you usually own).
+  * Delta writes are BEST-EFFORT: if you lack permission, the pipeline logs a
+    warning, skips the managed-table write, and still runs the Spark transform +
+    Lakebase upsert. Set WRITE_DELTA=false to skip Delta entirely.
 """
 
 import logging
@@ -48,7 +49,7 @@ _ATTRACTION_SCHEMA = StructType([
     StructField("latitude", DoubleType()),
     StructField("longitude", DoubleType()),
     StructField("category", StringType()),
-    StructField("is_outdoor", LongType()),   # 0/1 in Spark, cast to bool at upsert
+    StructField("is_outdoor", LongType()),
 ])
 
 _OUTDOOR_KW = ("park", "trail", "lake", "mountain", "garden", "falls", "canyon",
@@ -70,10 +71,51 @@ def _int(x):
     return int(round(x)) if x is not None else None
 
 
+def _resolve_target(spark, catalog, schema):
+    """Pick a Delta target: explicit args > config > session current catalog/schema."""
+    catalog = catalog or getattr(config, "UC_CATALOG", "") or spark.catalog.currentCatalog()
+    schema = schema or getattr(config, "UC_SCHEMA", "") or spark.catalog.currentDatabase()
+    return catalog, schema
+
+
+def _q(identifier: str) -> str:
+    """Backtick-quote an identifier so names with hyphens/spaces work in Spark SQL.
+
+    Normalizes any backticks the caller already added, so both "divy-catalog"
+    and "`divy-catalog`" resolve to the same quoted form.
+    """
+    name = identifier.strip().strip("`").replace("`", "``")
+    return f"`{name}`"
+
+
+def _write_delta(spark, df, catalog, schema, table, mode):
+    """Best-effort managed Delta write. Returns the table name, or None if skipped/denied."""
+    if not getattr(config, "WRITE_DELTA", True):
+        logger.info("WRITE_DELTA=false; skipping Delta write for %s", table)
+        return None
+    schema_fqn = f"{_q(catalog)}.{_q(schema)}"
+    fq = f"{schema_fqn}.{_q(table)}"
+    try:
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_fqn}")
+    except Exception as exc:
+        logger.warning("No CREATE SCHEMA on %s (%s); will try writing if it already exists.",
+                       schema_fqn, exc)
+    writer = df.write.format("delta").mode(mode)
+    if mode == "overwrite":
+        writer = writer.option("overwriteSchema", "true")
+    try:
+        writer.saveAsTable(fq)
+        logger.info("Wrote Delta table %s", fq)
+        return fq
+    except Exception as exc:
+        logger.warning("Delta write to %s skipped (%s). Pipeline continues with Lakebase only.", fq, exc)
+        return None
+
+
 # ----------------------------------------------------------------------------
 # Weather
 # ----------------------------------------------------------------------------
-def _fetch_weather_rows(destinations: list[dict]) -> list[tuple]:
+def _fetch_weather_rows(destinations):
     rows = []
     for d in destinations:
         for s in open_meteo.weather_snapshots(d["latitude"], d["longitude"]):
@@ -93,7 +135,7 @@ def _fetch_weather_rows(destinations: list[dict]) -> list[tuple]:
     return rows
 
 
-def _upsert_weather_snapshots(rows: list[tuple]) -> int:
+def _upsert_weather_snapshots(rows):
     if not rows:
         return 0
     sql = """
@@ -114,14 +156,17 @@ def _upsert_weather_snapshots(rows: list[tuple]) -> int:
             captured_at        = now()
     """
     template = "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'open-meteo')"
-    return lakebase.run_values(sql, rows, template=template)
+    lakebase.run_values(sql, rows, template=template)
+    # Every row is inserted-or-updated (ON CONFLICT DO UPDATE), so the effective
+    # upsert count is len(rows). We don't use run_values' return here because
+    # execute_values pages the insert and cur.rowcount reflects only the last page.
+    return len(rows)
 
 
-def ingest_weather(spark=None, catalog=None, schema=None) -> dict:
-    """Fetch forecasts, land bronze+silver Delta, upsert Lakebase weather_snapshots."""
+def ingest_weather(spark=None, catalog=None, schema=None):
+    """Fetch forecasts, land bronze+silver Delta (best-effort), upsert Lakebase."""
     spark = _spark(spark)
-    catalog = catalog or config.UC_CATALOG
-    schema = schema or config.UC_SCHEMA
+    catalog, schema = _resolve_target(spark, catalog, schema)
 
     dests = lakebase.run_query(
         "SELECT destination_id, name, latitude, longitude, timezone FROM destinations"
@@ -130,38 +175,29 @@ def ingest_weather(spark=None, catalog=None, schema=None) -> dict:
     if not raw:
         return {"fetched": 0}
 
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
     sdf = spark.createDataFrame(raw, schema=_WEATHER_SCHEMA)
+    bronze = _write_delta(spark, sdf.withColumn("_ingested_at", current_timestamp()),
+                          catalog, schema, "weather_bronze", "append")
 
-    # Bronze: immutable raw history (append).
-    (sdf.withColumn("_ingested_at", current_timestamp())
-        .write.format("delta").mode("append")
-        .saveAsTable(f"{catalog}.{schema}.weather_bronze"))
+    silver_df = sdf.dropDuplicates(["destination_id", "forecast_ts"])
+    silver = _write_delta(spark, silver_df, catalog, schema, "weather_silver", "overwrite")
 
-    # Silver: one row per (destination, hour), curated (overwrite current view).
-    silver = sdf.dropDuplicates(["destination_id", "forecast_ts"])
-    (silver.write.format("delta").mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(f"{catalog}.{schema}.weather_silver"))
-
-    # Sync curated rows into Lakebase for the app/agent to read.
     tuples = [
         (r["destination_id"], r["forecast_ts"], r["forecast_date"],
          r["temperature_c"], r["precipitation_mm"], r["precipitation_prob"],
          r["wind_kph"], r["us_aqi"], r["pm2_5"], r["pm10"], r["uv_index"])
-        for r in silver.collect()
+        for r in silver_df.collect()
     ]
     upserted = _upsert_weather_snapshots(tuples)
-    return {"fetched": len(raw), "silver_rows": silver.count(),
-            "lakebase_upserted": upserted,
-            "bronze_table": f"{catalog}.{schema}.weather_bronze",
-            "silver_table": f"{catalog}.{schema}.weather_silver"}
+    return {"fetched": len(raw), "silver_rows": silver_df.count(),
+            "lakebase_upserted": upserted, "bronze_table": bronze,
+            "silver_table": silver, "target": f"{catalog}.{schema}"}
 
 
 # ----------------------------------------------------------------------------
-# Attractions -> activities (unstructured text that later gets embedded)
+# Attractions -> activities
 # ----------------------------------------------------------------------------
-def _classify(title: str, extract: str | None) -> tuple[str, int]:
+def _classify(title, extract):
     t = f"{title} {extract or ''}".lower()
     if any(k in t for k in _INDOOR_KW):
         return "attraction", 0
@@ -170,26 +206,20 @@ def _classify(title: str, extract: str | None) -> tuple[str, int]:
     return "attraction", 0
 
 
-def _fetch_attraction_rows(destinations: list[dict], radius_m: int, limit: int) -> list[tuple]:
+def _fetch_attraction_rows(destinations, radius_m, limit):
     rows = []
     for d in destinations:
         for a in wikimedia.nearby_attractions(d["latitude"], d["longitude"], radius_m, limit):
             category, is_outdoor = _classify(a.get("title", ""), a.get("extract"))
             rows.append((
-                int(d["destination_id"]),
-                a.get("title"),
-                a.get("description"),
-                a.get("extract"),
-                _num(a.get("latitude")),
-                _num(a.get("longitude")),
-                category,
-                is_outdoor,
+                int(d["destination_id"]), a.get("title"), a.get("description"),
+                a.get("extract"), _num(a.get("latitude")), _num(a.get("longitude")),
+                category, is_outdoor,
             ))
     return rows
 
 
-def _upsert_activities(spark_rows) -> int:
-    """Insert new attraction-activities, skipping names that already exist per destination."""
+def _upsert_activities(spark_rows):
     inserted = 0
     with lakebase.get_connection() as conn:
         with conn.cursor() as cur:
@@ -207,20 +237,17 @@ def _upsert_activities(spark_rows) -> int:
                     """,
                     (r["destination_id"], r["title"], r["category"], r["extract"],
                      r["extract"], bool(r["is_outdoor"]), bool(r["is_outdoor"]),
-                     r["latitude"], r["longitude"],
-                     r["destination_id"], r["title"]),
+                     r["latitude"], r["longitude"], r["destination_id"], r["title"]),
                 )
                 inserted += cur.rowcount
         conn.commit()
     return inserted
 
 
-def ingest_attractions(spark=None, catalog=None, schema=None,
-                       radius_m: int = 10000, limit: int = 8) -> dict:
-    """Fetch nearby attractions, land bronze Delta, add new ones to Lakebase activities."""
+def ingest_attractions(spark=None, catalog=None, schema=None, radius_m=10000, limit=8):
+    """Fetch nearby attractions, land bronze Delta (best-effort), add new activities."""
     spark = _spark(spark)
-    catalog = catalog or config.UC_CATALOG
-    schema = schema or config.UC_SCHEMA
+    catalog, schema = _resolve_target(spark, catalog, schema)
 
     dests = lakebase.run_query(
         "SELECT destination_id, name, latitude, longitude FROM destinations"
@@ -229,19 +256,15 @@ def ingest_attractions(spark=None, catalog=None, schema=None,
     if not raw:
         return {"fetched": 0}
 
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
     sdf = spark.createDataFrame(raw, schema=_ATTRACTION_SCHEMA)
-    (sdf.withColumn("_ingested_at", current_timestamp())
-        .write.format("delta").mode("append")
-        .saveAsTable(f"{catalog}.{schema}.attractions_bronze"))
+    bronze = _write_delta(spark, sdf.withColumn("_ingested_at", current_timestamp()),
+                          catalog, schema, "attractions_bronze", "append")
 
     inserted = _upsert_activities(sdf.dropDuplicates(["destination_id", "title"]).collect())
-    return {"fetched": len(raw), "activities_inserted": inserted,
-            "bronze_table": f"{catalog}.{schema}.attractions_bronze"}
+    return {"fetched": len(raw), "activities_inserted": inserted, "bronze_table": bronze}
 
 
-def run(spark=None, catalog=None, schema=None) -> dict:
-    """Run the full ingestion pipeline."""
+def run(spark=None, catalog=None, schema=None):
     w = ingest_weather(spark, catalog, schema)
     a = ingest_attractions(spark, catalog, schema)
     logger.info("weather=%s attractions=%s", w, a)

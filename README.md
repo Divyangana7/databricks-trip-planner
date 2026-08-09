@@ -1,4 +1,4 @@
-# AI Trip & Outdoor Activity Planner — Databricks Capstone
+# AI Trip & Outdoor Activity Planner
 
 A Databricks app where users save destinations and preferences, then ask an AI
 agent to build a **weather-aware itinerary**. The agent retrieves suitable

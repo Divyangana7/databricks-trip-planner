@@ -10,6 +10,7 @@
 
 # COMMAND ----------
 # MAGIC %pip install psycopg2-binary requests openai pgvector
+# MAGIC %pip install sqlalchemy
 # COMMAND ----------
 dbutils.library.restartPython()
 

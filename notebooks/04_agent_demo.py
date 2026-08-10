@@ -100,11 +100,7 @@ show("AFTER — itinerary (note status='rescheduled' + reschedule_reason):",
 # COMMAND ----------
 # MAGIC %md ## 3. WRITE — build a packing list (BEFORE / AFTER)
 # COMMAND ----------
-rows = tools.list_packing(TRIP_ID)
-if rows:
-    show("BEFORE — packing list:", rows)
-else:
-    print("BEFORE — packing list: (empty)")
+show("BEFORE — packing list:", tools.list_packing(TRIP_ID))
 
 # COMMAND ----------
 r = agent.run_agent("Build me a packing list for this trip based on the weather and plan.",
@@ -118,8 +114,9 @@ show("AFTER — packing list:", tools.list_packing(TRIP_ID))
 # COMMAND ----------
 # MAGIC %md ## 4. WRITE — add a single item on request (BEFORE / AFTER)
 # COMMAND ----------
-show("BEFORE — day 1 items:",
-     [i for i in tools.list_itinerary(TRIP_ID) if str(i["day_date"]).endswith("-14")])
+_day1 = str(tools.get_trip(TRIP_ID)["start_date"])
+show(f"BEFORE — day 1 ({_day1}) items:",
+     [i for i in tools.list_itinerary(TRIP_ID) if str(i["day_date"]) == _day1])
 
 # COMMAND ----------
 r = agent.run_agent("Add a relaxing hot springs stop on the afternoon of the first day.",
@@ -128,5 +125,5 @@ print("REPLY:\n", r["reply"])
 print("\nTOOL CALLS:", [s["tool"] for s in r["steps"]])
 
 # COMMAND ----------
-show("AFTER — day 1 items:",
-     [i for i in tools.list_itinerary(TRIP_ID) if str(i["day_date"]).endswith("-14")])
+show(f"AFTER — day 1 ({_day1}) items:",
+     [i for i in tools.list_itinerary(TRIP_ID) if str(i["day_date"]) == _day1])

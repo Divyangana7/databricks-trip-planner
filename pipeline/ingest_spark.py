@@ -264,6 +264,111 @@ def ingest_attractions(spark=None, catalog=None, schema=None, radius_m=10000, li
     return {"fetched": len(raw), "activities_inserted": inserted, "bronze_table": bronze}
 
 
+# ----------------------------------------------------------------------------
+# Weather — SPARK-PARALLELIZED fetch (Phase 8)
+# The Open-Meteo calls run on the executors (one task per partition) via
+# mapInPandas, instead of a driver loop. This is what makes the ingest scale
+# with the cluster as the destination count grows.
+# ----------------------------------------------------------------------------
+_WEATHER_SPARK_SCHEMA = StructType([
+    StructField("destination_id", LongType()),
+    StructField("forecast_ts", StringType()),
+    StructField("forecast_date", StringType()),
+    StructField("temperature_c", DoubleType()),
+    StructField("precipitation_mm", DoubleType()),
+    StructField("precipitation_prob", DoubleType()),
+    StructField("wind_kph", DoubleType()),
+    StructField("us_aqi", DoubleType()),
+    StructField("pm2_5", DoubleType()),
+    StructField("pm10", DoubleType()),
+    StructField("uv_index", DoubleType()),
+])
+
+
+def ingest_weather_spark(spark=None, catalog=None, schema=None, partitions: int = 8) -> dict:
+    """Fetch forecasts for ALL destinations in parallel on the cluster."""
+    spark = _spark(spark)
+    catalog, schema = _resolve_target(spark, catalog, schema)
+
+    dests = lakebase.run_query("SELECT destination_id, latitude, longitude FROM destinations")
+    rows = [(int(d["destination_id"]), float(d["latitude"]), float(d["longitude"])) for d in dests]
+    if not rows:
+        return {"destinations": 0}
+
+    ddf = (spark.createDataFrame(rows, schema="destination_id long, latitude double, longitude double")
+           .repartition(min(partitions, len(rows))))
+
+    forecast_url = config.OPEN_METEO_FORECAST
+    aq_url = config.OPEN_METEO_AIR_QUALITY
+    cols = [f.name for f in _WEATHER_SPARK_SCHEMA.fields]
+
+    def _fetch(iterator):
+        import pandas as pd
+        import requests
+
+        def g(d, key, idx):
+            v = d.get(key)
+            return v[idx] if (v is not None and idx is not None and idx < len(v)) else None
+
+        for pdf in iterator:
+            out = []
+            for _, r in pdf.iterrows():
+                did, lat, lon = int(r["destination_id"]), float(r["latitude"]), float(r["longitude"])
+                try:
+                    wx = requests.get(forecast_url, params={
+                        "latitude": lat, "longitude": lon,
+                        "hourly": "temperature_2m,precipitation,precipitation_probability,wind_speed_10m",
+                        "timezone": "auto"}, timeout=30).json()
+                    aq = requests.get(aq_url, params={
+                        "latitude": lat, "longitude": lon,
+                        "hourly": "pm2_5,pm10,us_aqi,uv_index", "timezone": "auto"}, timeout=30).json()
+                except Exception:
+                    continue
+                wxh, aqh = wx.get("hourly", {}) or {}, aq.get("hourly", {}) or {}
+                aq_idx = {t: i for i, t in enumerate(aqh.get("time", []) or [])}
+                for i, t in enumerate(wxh.get("time", []) or []):
+                    ai = aq_idx.get(t)
+                    out.append({
+                        "destination_id": did, "forecast_ts": t, "forecast_date": t[:10],
+                        "temperature_c": g(wxh, "temperature_2m", i),
+                        "precipitation_mm": g(wxh, "precipitation", i),
+                        "precipitation_prob": g(wxh, "precipitation_probability", i),
+                        "wind_kph": g(wxh, "wind_speed_10m", i),
+                        "us_aqi": g(aqh, "us_aqi", ai), "pm2_5": g(aqh, "pm2_5", ai),
+                        "pm10": g(aqh, "pm10", ai), "uv_index": g(aqh, "uv_index", ai),
+                    })
+            if out:
+                yield pd.DataFrame(out, columns=cols)
+            else:
+                yield pd.DataFrame({c: pd.Series(
+                    dtype=("int64" if c == "destination_id"
+                           else "object" if c in ("forecast_ts", "forecast_date") else "float64"))
+                    for c in cols})
+
+    # Materialize once (the API calls) and cache, so bronze/silver/collect don't refetch.
+    weather_sdf = ddf.mapInPandas(_fetch, schema=_WEATHER_SPARK_SCHEMA).cache()
+    fetched = weather_sdf.count()
+
+    bronze = _write_delta(spark, weather_sdf.withColumn("_ingested_at", current_timestamp()),
+                          catalog, schema, "weather_bronze", "append")
+    silver_df = weather_sdf.dropDuplicates(["destination_id", "forecast_ts"]).cache()
+    silver_rows = silver_df.count()
+    silver = _write_delta(spark, silver_df, catalog, schema, "weather_silver", "overwrite")
+
+    tuples = [
+        (r["destination_id"], r["forecast_ts"], r["forecast_date"], r["temperature_c"],
+         r["precipitation_mm"], _int(r["precipitation_prob"]), r["wind_kph"],
+         _int(r["us_aqi"]), r["pm2_5"], r["pm10"], r["uv_index"])
+        for r in silver_df.collect()
+    ]
+    upserted = _upsert_weather_snapshots(tuples)
+    weather_sdf.unpersist(); silver_df.unpersist()
+    return {"destinations": len(rows), "partitions": ddf.rdd.getNumPartitions(),
+            "fetched_rows": fetched, "silver_rows": silver_rows,
+            "lakebase_upserted": upserted, "bronze_table": bronze,
+            "silver_table": silver, "target": f"{catalog}.{schema}"}
+
+
 def run(spark=None, catalog=None, schema=None, gate: bool = False):
     w = ingest_weather(spark, catalog, schema)
     a = ingest_attractions(spark, catalog, schema)

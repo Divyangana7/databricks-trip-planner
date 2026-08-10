@@ -10,7 +10,7 @@
 # MAGIC the path, set `REPO_ROOT` below and uncomment the sys.path line.
 
 # COMMAND ----------
-# MAGIC %pip install requests openai
+# MAGIC %pip install requests openai sqlalchemy
 # COMMAND ----------
 dbutils.library.restartPython()
 
@@ -39,7 +39,9 @@ display(pd.DataFrame(snaps).head(12))
 # COMMAND ----------
 print("Summary:", wikimedia.summary("Banff, Alberta")["description"])
 near = wikimedia.nearby_attractions(place["latitude"], place["longitude"], radius_m=8000, limit=5)
-display(pd.DataFrame(near)[["title", "distance_m", "description"]])
+_df = pd.DataFrame(near)
+_cols = [c for c in ["title", "distance_m", "description"] if c in _df.columns]
+display(_df[_cols])
 
 # COMMAND ----------
 # MAGIC %md ## 3. Foundation Model APIs — embeddings + chat

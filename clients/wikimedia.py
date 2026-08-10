@@ -111,15 +111,29 @@ def nearby_attractions(latitude: float, longitude: float, radius_m: int = 10000,
     resp = _get(config.WIKIMEDIA_API, params)
     resp.raise_for_status()
     pages = (resp.json().get("query", {}) or {}).get("pages", {}) or {}
+
+    def _dist_m(plat, plon):
+        # rough great-circle distance in metres (for display/sort only)
+        import math
+        if plat is None or plon is None:
+            return None
+        dlat = math.radians(plat - latitude)
+        dlon = math.radians(plon - longitude)
+        a = (math.sin(dlat / 2) ** 2
+             + math.cos(math.radians(latitude)) * math.cos(math.radians(plat)) * math.sin(dlon / 2) ** 2)
+        return round(6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
     rows = []
     for p in pages.values():
         coord = (p.get("coordinates") or [{}])[0]
+        plat, plon = coord.get("lat", latitude), coord.get("lon", longitude)
         rows.append({
             "pageid": p.get("pageid"),
             "title": p.get("title"),
             "index": p.get("index", 9999),           # generator order = by distance
-            "latitude": coord.get("lat", latitude),
-            "longitude": coord.get("lon", longitude),
+            "latitude": plat,
+            "longitude": plon,
+            "distance_m": _dist_m(plat, plon),
             "description": p.get("description"),
             "extract": p.get("extract"),
         })

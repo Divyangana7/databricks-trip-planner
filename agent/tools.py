@@ -134,11 +134,25 @@ def search_activities(trip_id: int, query: str, top_k: int = 5,
 
 
 # --------------------------------------------------------------- writes -----
+def _valid_activity(activity_id):
+    """Coerce 0/None/nonexistent activity ids to NULL so the FK never fails.
+
+    The model sometimes passes activity_id=0 as a 'no specific activity'
+    placeholder; that would violate the foreign key, so we drop it and keep the
+    item as a free-text entry.
+    """
+    if not activity_id:  # None or 0
+        return None
+    exists = lakebase.run_query("SELECT 1 FROM activities WHERE activity_id = %s", (activity_id,))
+    return activity_id if exists else None
+
+
 def add_itinerary_item(trip_id: int, day_date: str | None = None, title: str = "Untitled",
                        activity_id: int | None = None,
                        start_time: str | None = None, end_time: str | None = None,
                        notes: str | None = None) -> dict:
     day_date = _resolve_day(trip_id, day_date)          # never empty / out of range
+    activity_id = _valid_activity(activity_id)          # 0/invalid -> NULL (no FK error)
     start_time, end_time = _norm(start_time), _norm(end_time)
     rows = lakebase.run_write_returning(
         """

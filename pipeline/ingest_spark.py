@@ -264,8 +264,13 @@ def ingest_attractions(spark=None, catalog=None, schema=None, radius_m=10000, li
     return {"fetched": len(raw), "activities_inserted": inserted, "bronze_table": bronze}
 
 
-def run(spark=None, catalog=None, schema=None):
+def run(spark=None, catalog=None, schema=None, gate: bool = False):
     w = ingest_weather(spark, catalog, schema)
     a = ingest_attractions(spark, catalog, schema)
     logger.info("weather=%s attractions=%s", w, a)
-    return {"weather": w, "attractions": a}
+    result = {"weather": w, "attractions": a}
+    if gate:
+        # Fail loud if the freshly-ingested data violates an invariant.
+        from quality import checks
+        result["quality"] = checks.gate()
+    return result

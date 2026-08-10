@@ -10,7 +10,6 @@
 
 # COMMAND ----------
 # MAGIC %pip install psycopg2-binary requests openai pgvector
-# MAGIC %pip install sqlalchemy
 # COMMAND ----------
 dbutils.library.restartPython()
 
@@ -19,6 +18,14 @@ import os, sys
 sys.path.insert(0, os.path.abspath(".."))   # repo root
 import lakebase
 from pipeline import ingest_spark
+
+# OPTIONAL — choose where the Delta tables go. Defaults to your current
+# catalog/schema. Set these to a catalog you own if you got PERMISSION_DENIED.
+# Hyphens are handled for you now, so no backticks needed:
+import config
+config.UC_CATALOG = "divy-catalog"     # <-- your catalog
+config.UC_SCHEMA  = "trip_planner"
+print("Delta target ->", config.UC_CATALOG, "/", config.UC_SCHEMA)
 
 # COMMAND ----------
 # MAGIC %md ## Before — current row counts
@@ -47,5 +54,10 @@ print("AFTER:", after)
 # COMMAND ----------
 # MAGIC %md ## Delta silver sample (the Spark-curated layer)
 # COMMAND ----------
-import config
-display(spark.table(f"{config.UC_CATALOG}.{config.UC_SCHEMA}.weather_silver").limit(15))
+silver_table = result.get("weather", {}).get("silver_table")
+if silver_table:
+    display(spark.table(silver_table).limit(15))
+else:
+    print("Delta silver was skipped (no catalog write permission). "
+          "Lakebase was still populated by the Spark pipeline — see the AFTER counts above. "
+          "To capture Delta evidence, set config.UC_CATALOG/UC_SCHEMA to a catalog you own and re-run.")

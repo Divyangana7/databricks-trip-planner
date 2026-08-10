@@ -7,10 +7,6 @@ Foundation Model APIs, and pgvector inside Lakebase.
 
 import os
 
-# --- Unity Catalog (Delta bronze/silver tables written by the Spark pipeline)
-UC_CATALOG = os.environ.get("UC_CATALOG", "main")
-UC_SCHEMA = os.environ.get("UC_SCHEMA", "trip_planner")
-
 # --- Lakebase secret scope (matches app.yaml / Day-1 convention) ------------
 LAKEBASE_SECRET_SCOPE = os.environ.get("LAKEBASE_SECRET_SCOPE", "database")
 LAKEBASE_SECRET_KEY = os.environ.get("LAKEBASE_SECRET_KEY", "lakebase-url")
@@ -41,8 +37,15 @@ WIKIMEDIA_USER_AGENT = os.environ.get(
     "databricks-trip-planner/1.0 (https://github.com/Divyangana7/databricks-trip-planner)",
 )
 
-# --- Retrieval / agent tuning ----------------------------------------------
-RETRIEVAL_TOP_K = int(os.environ.get("RETRIEVAL_TOP_K", "5"))
+# --- Unity Catalog (Delta bronze/silver tables written by the Spark pipeline).
+# Leave empty to use the session's CURRENT catalog/schema (which you usually own).
+# Set these only if you want the Delta tables in a specific place you can write to.
+UC_CATALOG = os.environ.get("UC_CATALOG", "")
+UC_SCHEMA = os.environ.get("UC_SCHEMA", "")
+# Set WRITE_DELTA=false to skip Delta entirely (pipeline still runs Spark + Lakebase).
+WRITE_DELTA = os.environ.get("WRITE_DELTA", "true").lower() == "true"
+
+# --- Retrieval / agent tuning ----------------------------------------------RETRIEVAL_TOP_K = int(os.environ.get("RETRIEVAL_TOP_K", "5"))
 # Thresholds the agent uses to decide an outdoor item is unsafe.
 RAIN_PROB_THRESHOLD = int(os.environ.get("RAIN_PROB_THRESHOLD", "60"))       # %
 PRECIP_MM_THRESHOLD = float(os.environ.get("PRECIP_MM_THRESHOLD", "2.0"))     # mm/hr

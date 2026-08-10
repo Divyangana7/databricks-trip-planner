@@ -23,7 +23,9 @@ SYSTEM_PROMPT = (
     "reschedule outdoor activities when rain or poor air quality is forecast).\n"
     "Always prefer retrieving real data with tools over guessing. When you change "
     "the plan for weather reasons, state the specific reason (e.g. the AQI value "
-    "or rain probability). Be concise and end with a short summary of what you did."
+    "or rain probability). When adding an itinerary item, call add_itinerary_item "
+    "exactly once for that item, including its time in the same call. Be concise "
+    "and end with a short summary of what you did."
 )
 
 # --- OpenAI-style tool schemas ---------------------------------------------

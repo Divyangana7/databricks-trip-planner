@@ -1,4 +1,4 @@
-# AI Trip & Outdoor Activity Planner
+# AI Trip & Outdoor Activity Planner — Databricks Capstone
 
 A Databricks app where users save destinations and preferences, then ask an AI
 agent to build a **weather-aware itinerary**. The agent retrieves suitable
@@ -42,8 +42,13 @@ config.py  lakebase.py  setup_secrets.py  requirements.txt [Phase 1 — DONE]
 models.py                                                 [Phase 2 — DONE] FMA embed/chat client
 clients/open_meteo.py  clients/wikimedia.py               [Phase 2 — DONE] API clients
 notebooks/01_smoke_test_clients.py                        [Phase 2 — DONE] live API + model checks
-pipeline/ingest_spark.py  pipeline/embed_job.py           [Phase 3] Spark + embeddings
-agent/tools.py  agent/agent.py                            [Phase 4] agent + tools
+pipeline/ingest_spark.py  pipeline/embed_job.py           [Phase 3 — DONE] Spark + embeddings
+notebooks/02_ingest_pipeline.py  notebooks/03_embed_job.py [Phase 3 — DONE] pipeline drivers
+agent/tools.py  agent/agent.py                            [Phase 4 — DONE] agent + tools
+notebooks/04_agent_demo.py                                [Phase 4 — DONE] agent demo + evidence
+quality/checks.py  tests/test_data_quality.py            [Phase 7 — DONE] data-quality gate + pytest
+eval/retrieval_eval.py  eval/agent_eval.py               [Phase 7 — DONE] recall + agent scoring
+notebooks/05_eval_and_quality.py                          [Phase 7 — DONE] rigor evidence
 app.py  app.yaml  templates/index.html                    [Phase 5] Databricks App
 evidence/RUNBOOK.md                                       [Phase 6] screenshot-by-screenshot
 ```

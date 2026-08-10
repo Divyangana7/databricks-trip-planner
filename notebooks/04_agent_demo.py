@@ -100,7 +100,11 @@ show("AFTER — itinerary (note status='rescheduled' + reschedule_reason):",
 # COMMAND ----------
 # MAGIC %md ## 3. WRITE — build a packing list (BEFORE / AFTER)
 # COMMAND ----------
-show("BEFORE — packing list:", tools.list_packing(TRIP_ID))
+rows = tools.list_packing(TRIP_ID)
+if rows:
+    show("BEFORE — packing list:", rows)
+else:
+    print("BEFORE — packing list: (empty)")
 
 # COMMAND ----------
 r = agent.run_agent("Build me a packing list for this trip based on the weather and plan.",

@@ -30,7 +30,38 @@ _EMBED_BATCH = 100
 
 @functools.lru_cache(maxsize=1)
 def _client():
-    """OpenAI-compatible client bound to this workspace's serving endpoints."""
+    """OpenAI-compatible client bound to this workspace's serving endpoints.
+
+    In notebooks/jobs, WorkspaceClient().serving_endpoints.get_open_ai_client()
+    works directly. In a deployed Databricks App the SDK can't always resolve the
+    host/token that way, so we build the OpenAI client explicitly from the App's
+    injected credentials, and fall back to the SDK helper otherwise.
+    """
+    import os
+
+    host = (os.environ.get("DATABRICKS_HOST")
+            or os.environ.get("DATABRICKS_WORKSPACE_URL"))
+    token = os.environ.get("DATABRICKS_TOKEN")
+    # Databricks Apps inject the service-principal OAuth token here.
+    client_id = os.environ.get("DATABRICKS_CLIENT_ID")
+    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET")
+
+    try:
+        from openai import OpenAI
+        if host and token:
+            base = host if host.startswith("http") else f"https://{host}"
+            return OpenAI(api_key=token, base_url=f"{base}/serving-endpoints")
+        if host and client_id and client_secret:
+            # Exchange the SP credentials for a bearer token via the SDK, then
+            # point a plain OpenAI client at the serving-endpoints base URL.
+            w = WorkspaceClient()
+            headers = w.config.authenticate()  # {'Authorization': 'Bearer ...'}
+            bearer = headers.get("Authorization", "Bearer ").split(" ", 1)[-1]
+            base = host if host.startswith("http") else f"https://{host}"
+            return OpenAI(api_key=bearer, base_url=f"{base}/serving-endpoints")
+    except Exception as exc:
+        logger.warning("explicit OpenAI client build failed (%s); falling back to SDK helper", exc)
+
     return WorkspaceClient().serving_endpoints.get_open_ai_client()
 
 

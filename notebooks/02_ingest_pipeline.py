@@ -9,22 +9,18 @@
 # MAGIC result dict, (c) the `weather_silver` Delta sample.
 
 # COMMAND ----------
-# MAGIC %pip install psycopg2-binary requests openai pgvector
+# MAGIC %pip install psycopg2-binary requests openai pgvector sqlalchemy
 # COMMAND ----------
 dbutils.library.restartPython()
 
 # COMMAND ----------
 import os, sys
 sys.path.insert(0, os.path.abspath(".."))   # repo root
-import lakebase
+import config, lakebase
 from pipeline import ingest_spark
 
-# OPTIONAL — choose where the Delta tables go. Defaults to your current
-# catalog/schema. Set these to a catalog you own if you got PERMISSION_DENIED.
-# Hyphens are handled for you now, so no backticks needed:
-import config
-config.UC_CATALOG = "divy-catalog"     # <-- your catalog
-config.UC_SCHEMA  = "trip_planner"
+# Delta target comes from config (defaults to your catalog). Override here if needed:
+# config.UC_CATALOG = "divy-catalog"; config.UC_SCHEMA = "trip_planner"
 print("Delta target ->", config.UC_CATALOG, "/", config.UC_SCHEMA)
 
 # COMMAND ----------

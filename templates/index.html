@@ -1,1 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trailhead — weather-aware trip planner</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0e1621; --ink2:#13202c; --panel:#16232f; --panel2:#1b2b39;
+    --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.14);
+    --mist:#e7eef4; --muted:#8ca2b3; --dim:#5f7688;
+    --glacier:#49c9b8; --glacier-dim:#2c7a72;
+    --amber:#eaa84a; --rose:#e0607b; --good:#6bd08f;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 78% -10%, #1c3140 0%, var(--ink) 55%) fixed;
+    color:var(--mist); font-family:"Inter",system-ui,sans-serif; font-size:14px; line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{display:grid; grid-template-columns:400px 1fr; grid-template-rows:auto 1fr; height:100vh;
+    grid-template-areas:"head head" "rail map";}
+  header{grid-area:head; display:flex; align-items:baseline; gap:16px; padding:16px 22px;
+    border-bottom:1px solid var(--line); background:rgba(10,18,26,.6); backdrop-filter:blur(8px);}
+  .brand{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:19px; letter-spacing:-.02em;}
+  .brand b{color:var(--glacier); font-weight:700}
+  .tagline{color:var(--muted); font-size:12.5px}
+  .who{margin-left:auto; color:var(--dim); font-family:"JetBrains Mono",monospace; font-size:11.5px}
 
+  .rail{grid-area:rail; overflow-y:auto; border-right:1px solid var(--line); padding:16px;
+    display:flex; flex-direction:column; gap:14px;}
+  #map{grid-area:map; height:100%; background:var(--ink2)}
+  .leaflet-container{background:var(--ink2)}
+
+  .card{background:linear-gradient(180deg,var(--panel),var(--ink2)); border:1px solid var(--line);
+    border-radius:var(--r); padding:14px;}
+  .eyebrow{font-family:"JetBrains Mono",monospace; font-size:10.5px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--dim); margin:0 0 9px}
+
+  select{width:100%; background:var(--ink); color:var(--mist); border:1px solid var(--line2);
+    border-radius:10px; padding:10px 12px; font-family:inherit; font-size:14px; outline:none}
+  select:focus{border-color:var(--glacier-dim)}
+
+  .trip-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:2px}
+  .trip-title{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:17px; letter-spacing:-.01em}
+  .trip-meta{color:var(--muted); font-size:12.5px; font-family:"JetBrains Mono",monospace}
+  .pill{font-size:10.5px; font-family:"JetBrains Mono",monospace; padding:2px 8px; border-radius:999px;
+    border:1px solid var(--line2); color:var(--muted)}
+
+  .ribbon{display:flex; gap:6px; margin-top:10px}
+  .day{flex:1; border-radius:10px; padding:8px 8px 9px; border:1px solid var(--line);
+    background:var(--ink); position:relative; overflow:hidden}
+  .day .d{font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--muted)}
+  .day .aqi{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:20px; line-height:1.1; margin-top:3px}
+  .day .aqi small{font-size:10px; font-weight:500; color:var(--dim); display:block; letter-spacing:.08em}
+  .day .bar{position:absolute; left:0; bottom:0; height:3px; width:100%}
+  .day.bad{border-color:rgba(224,96,123,.4)}
+  .day .tag{font-size:10px; color:var(--rose); margin-top:5px; min-height:13px}
+  .day .tag.ok{color:var(--good)}
+
+  canvas{margin-top:6px}
+
+  .list{display:flex; flex-direction:column; gap:8px}
+  .day-group .dg-label{font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--dim);
+    letter-spacing:.1em; margin:10px 2px 6px; text-transform:uppercase}
+  .item{display:grid; grid-template-columns:52px 1fr; gap:10px; padding:10px; border:1px solid var(--line);
+    border-radius:11px; background:var(--ink); transition:box-shadow .5s, border-color .5s}
+  .item .time{font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--muted)}
+  .item .t{font-weight:550; font-size:13.5px}
+  .item .sub{font-size:11.5px; color:var(--muted); margin-top:2px; display:flex; gap:6px; align-items:center}
+  .dot{width:6px; height:6px; border-radius:50%}
+  .dot.out{background:var(--amber)} .dot.in{background:var(--glacier)}
+  .item.resch{border-color:rgba(234,168,74,.45)}
+  .item.resch .reason{color:var(--amber); font-size:11.5px; margin-top:5px}
+  .item.flash{box-shadow:0 0 0 1px var(--glacier), 0 0 22px rgba(73,201,184,.35)}
+  .badge{font-size:9.5px; font-family:"JetBrains Mono",monospace; padding:1px 6px; border-radius:6px;
+    border:1px solid var(--line2); color:var(--muted); text-transform:uppercase; letter-spacing:.06em}
+  .badge.resch{color:var(--amber); border-color:rgba(234,168,74,.4)}
+
+  .pack{display:flex; flex-wrap:wrap; gap:6px}
+  .chip{font-size:11.5px; padding:5px 9px; border-radius:999px; background:var(--ink);
+    border:1px solid var(--line); color:var(--mist)}
+  .chip small{color:var(--dim)}
+
+  .agent{margin-top:auto; position:sticky; bottom:0}
+  .prompts{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px}
+  .prompt{font-size:11.5px; padding:6px 10px; border-radius:999px; cursor:pointer; color:var(--mist);
+    background:var(--panel2); border:1px solid var(--line2); transition:.15s}
+  .prompt:hover{border-color:var(--glacier-dim); color:var(--glacier)}
+  .composer{display:flex; gap:8px}
+  .composer input{flex:1; background:var(--ink); border:1px solid var(--line2); border-radius:11px;
+    padding:11px 13px; color:var(--mist); font-family:inherit; font-size:13.5px; outline:none}
+  .composer input:focus{border-color:var(--glacier-dim)}
+  .send{background:var(--glacier); color:#04211d; border:none; border-radius:11px; padding:0 16px;
+    font-weight:650; font-family:"Space Grotesk",sans-serif; cursor:pointer; font-size:14px}
+  .send:disabled{opacity:.5; cursor:default}
+  .reply{margin-top:10px; font-size:13px; color:var(--mist); background:var(--ink);
+    border:1px solid var(--line); border-left:2px solid var(--glacier); border-radius:9px; padding:10px 12px;
+    white-space:pre-wrap}
+  .reply .trace{font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--dim); margin-top:7px}
+  .thinking{color:var(--glacier); font-size:12.5px}
+
+  .empty{color:var(--dim); font-size:12.5px; padding:6px 2px}
+  .rail::-webkit-scrollbar{width:9px} .rail::-webkit-scrollbar-thumb{background:var(--line2); border-radius:9px}
+  @media (max-width:820px){ .app{grid-template-columns:1fr; grid-template-rows:auto 320px 1fr;
+    grid-template-areas:"head" "map" "rail";} #map{grid-area:map} }
+  @media (prefers-reduced-motion:reduce){ .item{transition:none} .item.flash{box-shadow:none} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <div class="brand">Trail<b>head</b></div>
+      <div class="tagline">weather-aware itineraries, rescheduled by air quality</div>
+    </div>
+    <div class="who" id="who"></div>
+  </header>
+
+  <aside class="rail">
+    <div class="card">
+      <p class="eyebrow">Trip</p>
+      <select id="tripSelect"></select>
+      <div id="tripHead"></div>
+      <div class="ribbon" id="ribbon"></div>
+      <canvas id="wxChart" height="120"></canvas>
+    </div>
+
+    <div class="card">
+      <p class="eyebrow">Itinerary</p>
+      <div class="list" id="itinerary"></div>
+    </div>
+
+    <div class="card">
+      <p class="eyebrow">Packing list</p>
+      <div class="pack" id="packing"></div>
+    </div>
+
+    <div class="card agent">
+      <p class="eyebrow">Ask the planner</p>
+      <div class="prompts" id="prompts"></div>
+      <div class="composer">
+        <input id="msg" placeholder="Reschedule outdoor plans for the air quality…" autocomplete="off"/>
+        <button class="send" id="send">Send</button>
+      </div>
+      <div id="reply"></div>
+    </div>
+  </aside>
+
+  <div id="map"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let MAP, MARKERS = {}, CHART, STATE = {trip_id:null, trips:[]};
+
+const aqiColor = a => a==null?'#5f7688' : a<50?'#6bd08f' : a<100?'#eaa84a' : a<150?'#f2864a' : '#e0607b';
+const aqiLabel = a => a==null?'—' : a<50?'good' : a<100?'moderate' : a<150?'unhealthy·sg' : 'unhealthy';
+
+async function boot(){
+  const d = await (await fetch('/api/bootstrap')).json();
+  STATE.trips = d.trips;
+  $('#who').textContent = d.user;
+  initMap(d.destinations, d.trips);
+  const sel = $('#tripSelect');
+  sel.innerHTML = d.trips.map(t=>`<option value="${t.trip_id}">${t.title} · ${t.destination}</option>`).join('');
+  sel.onchange = () => selectTrip(+sel.value);
+  if(d.trips.length) selectTrip(d.trips[0].trip_id);
+}
+
+function initMap(dests, trips){
+  MAP = L.map('map',{zoomControl:true, attributionControl:false}).setView([40,0],2);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19}).addTo(MAP);
+  dests.forEach(x=>{
+    if(x.latitude==null) return;
+    const m = L.circleMarker([x.latitude,x.longitude],{
+      radius:6, color:'#49c9b8', weight:1.5, fillColor:'#1b2b39', fillOpacity:.9
+    }).addTo(MAP);
+    m.bindTooltip(`<b>${x.name}</b><br>${x.country||''}`,{direction:'top',opacity:.95});
+    MARKERS[x.destination_id]=m;
+  });
+}
+
+async function selectTrip(id){
+  STATE.trip_id = id;
+  $('#itinerary').innerHTML = '<div class="empty">Loading…</div>';
+  const d = await (await fetch('/api/trip/'+id)).json();
+  render(d);
+  const t = STATE.trips.find(t=>t.trip_id===id);
+  if(t && t.latitude!=null){ MAP.flyTo([t.latitude,t.longitude],8,{duration:.8});
+    Object.values(MARKERS).forEach(m=>m.setStyle({radius:6,color:'#49c9b8'}));
+    const mk=MARKERS[t.destination_id]; if(mk){mk.setStyle({radius:10,color:'#eaa84a'}); mk.bringToFront();}
+  }
+}
+
+function render(d, changed){
+  const t = d.trip;
+  $('#tripHead').innerHTML =
+    `<div class="trip-head" style="margin-top:12px">
+       <div class="trip-title">${t.title}</div>
+       <span class="pill">${t.status}</span></div>
+     <div class="trip-meta">${t.destination}, ${t.country} · ${t.start_date} → ${t.end_date}</div>`;
+
+  // AQI ribbon
+  $('#ribbon').innerHTML = d.weather.map(w=>`
+    <div class="day ${w.is_bad?'bad':''}">
+      <div class="d">${(w.forecast_date||'').slice(5)}</div>
+      <div class="aqi" style="color:${aqiColor(w.max_aqi)}">${w.max_aqi??'—'}<small>${aqiLabel(w.max_aqi)}</small></div>
+      <div class="tag ${w.is_bad?'':'ok'}">${w.is_bad? (w.bad_reason||'poor') : 'clear'}</div>
+      <div class="bar" style="background:${aqiColor(w.max_aqi)}"></div>
+    </div>`).join('') || '<div class="empty">No forecast for these dates.</div>';
+
+  drawChart(d.weather);
+  renderItinerary(d.itinerary, changed);
+
+  $('#packing').innerHTML = d.packing.length
+    ? d.packing.map(p=>`<span class="chip">${p.item_name} <small>· ${p.category||''}</small></span>`).join('')
+    : '<div class="empty">No packing list yet — ask the planner to build one.</div>';
+}
+
+function renderItinerary(items, changed){
+  if(!items.length){ $('#itinerary').innerHTML='<div class="empty">No items yet.</div>'; return; }
+  const byDay = {};
+  items.forEach(i=>{ (byDay[i.day_date] = byDay[i.day_date]||[]).push(i); });
+  $('#itinerary').innerHTML = Object.entries(byDay).map(([day,list])=>`
+    <div class="day-group"><div class="dg-label">${day}</div>
+    ${list.map(i=>`
+      <div class="item ${i.status==='rescheduled'?'resch':''} ${changed&&changed.has(i.item_id)?'flash':''}">
+        <div class="time">${(i.start_time||'').slice(0,5)||'—'}</div>
+        <div>
+          <div class="t">${i.title}
+            ${i.status==='rescheduled'?'<span class="badge resch">rescheduled</span>':''}</div>
+          <div class="sub"><span class="dot ${i.is_outdoor?'out':'in'}"></span>
+            ${i.is_outdoor?'outdoor':'indoor'}${i.category?' · '+i.category:''}</div>
+          ${i.reschedule_reason?`<div class="reason">↻ ${i.reschedule_reason}</div>`:''}
+        </div>
+      </div>`).join('')}</div>`).join('');
+}
+
+let CHART_REF;
+function drawChart(weather){
+  const ctx = $('#wxChart');
+  const labels = weather.map(w=>(w.forecast_date||'').slice(5));
+  const aqi = weather.map(w=>w.max_aqi);
+  const temp = weather.map(w=>w.max_temp_c);
+  if(CHART_REF) CHART_REF.destroy();
+  CHART_REF = new Chart(ctx,{
+    data:{labels, datasets:[
+      {type:'bar', label:'AQI', data:aqi, yAxisID:'y',
+        backgroundColor:weather.map(w=>aqiColor(w.max_aqi)), borderRadius:5, barPercentage:.6},
+      {type:'line', label:'Max °C', data:temp, yAxisID:'y1', borderColor:'#49c9b8',
+        backgroundColor:'#49c9b8', tension:.35, pointRadius:3, borderWidth:2}
+    ]},
+    options:{responsive:true, plugins:{legend:{labels:{color:'#8ca2b3', font:{size:10}, boxWidth:10}}},
+      scales:{
+        x:{ticks:{color:'#5f7688', font:{size:10}}, grid:{display:false}},
+        y:{position:'left', ticks:{color:'#5f7688', font:{size:10}}, grid:{color:'rgba(255,255,255,.05)'},
+           title:{display:true,text:'US AQI',color:'#5f7688',font:{size:9}}},
+        y1:{position:'right', ticks:{color:'#5f7688', font:{size:10}}, grid:{display:false}}
+      }}
+  });
+}
+
+// --- agent ---
+const PROMPTS = [
+  "Reschedule outdoor plans for the air quality",
+  "Build a packing list",
+  "Add a coffee stop tomorrow morning",
+  "What indoor options are there?"
+];
+$('#prompts').innerHTML = PROMPTS.map(p=>`<span class="prompt">${p}</span>`).join('');
+document.querySelectorAll('.prompt').forEach(el=>el.onclick=()=>{ $('#msg').value=el.textContent; ask(); });
+$('#send').onclick = ask;
+$('#msg').addEventListener('keydown', e=>{ if(e.key==='Enter') ask(); });
+
+async function ask(){
+  const message = $('#msg').value.trim();
+  if(!message || STATE.trip_id==null) return;
+  $('#send').disabled = true;
+  $('#reply').innerHTML = '<div class="thinking">Planning…</div>';
+  const before = await (await fetch('/api/trip/'+STATE.trip_id)).json();
+  const beforeIds = new Set(before.itinerary.map(i=>i.item_id));
+  const beforeStatus = {}; before.itinerary.forEach(i=>beforeStatus[i.item_id]=i.status);
+  try{
+    const r = await (await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({trip_id:STATE.trip_id, message})})).json();
+    if(r.error){ $('#reply').innerHTML = `<div class="reply">${r.error}</div>`; return; }
+    const changed = new Set(r.itinerary.filter(i=>!beforeIds.has(i.item_id)||beforeStatus[i.item_id]!==i.status)
+                                       .map(i=>i.item_id));
+    render(r, changed);
+    $('#reply').innerHTML =
+      `<div class="reply">${r.reply}<div class="trace">tools · ${r.tools.join(' → ')||'none'}</div></div>`;
+    $('#msg').value='';
+  }catch(e){ $('#reply').innerHTML = `<div class="reply">Something went wrong. Try again.</div>`; }
+  finally{ $('#send').disabled = false; }
+}
+
+boot();
+</script>
+</body>
+</html>
